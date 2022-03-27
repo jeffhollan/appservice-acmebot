@@ -585,10 +585,10 @@ namespace AppService.Acmebot.Functions
         }
 
         [FunctionName(nameof(SendCompletedEvent))]
-        public Task SendCompletedEvent([ActivityTrigger] (Site, DateTime?, IReadOnlyList<string>) input)
+        public Task SendCompletedEvent([ActivityTrigger] (ContainerApp, DateTime?, IReadOnlyList<string>) input)
         {
             var (site, expirationDate, dnsNames) = input;
-            var (appName, slotName) = site.SplitName();
+            var (appName, slotName) = (site.Name, "");
 
             return _webhookInvoker.SendCompletedEventAsync(appName, slotName ?? "production", expirationDate, dnsNames);
         }

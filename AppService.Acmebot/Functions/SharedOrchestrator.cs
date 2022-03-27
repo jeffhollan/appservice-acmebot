@@ -22,18 +22,9 @@ namespace AppService.Acmebot.Functions
 
             var activity = context.CreateActivityProxy<ISharedActivity>();
 
-            // ワイルドカード、コンテナ、Linux の場合は DNS-01 を利用する
-            var useDns01Auth = forceDns01Challenge || dnsNames.Any(x => x.StartsWith("*")) || site.Kind.Contains("container") || site.Kind.Contains("linux");
+            // Always using DNS Auth for Container Apps
+            await activity.Dns01Precondition(dnsNames);
 
-            // 前提条件をチェック
-            if (useDns01Auth)
-            {
-                await activity.Dns01Precondition(dnsNames);
-            }
-            else
-            {
-                await activity.Http01Precondition(site);
-            }
 
             // 新しく ACME Order を作成する
             var orderDetails = await activity.Order(dnsNames);
@@ -45,23 +36,14 @@ namespace AppService.Acmebot.Functions
                 IReadOnlyList<AcmeChallengeResult> challengeResults;
 
                 // ACME Challenge を実行
-                if (useDns01Auth)
-                {
-                    challengeResults = await activity.Dns01Authorization(orderDetails.Payload.Authorizations);
+                challengeResults = await activity.Dns01Authorization(orderDetails.Payload.Authorizations);
 
-                    // DNS レコードの変更が伝搬するまで 10 秒遅延させる
-                    await context.CreateTimer(context.CurrentUtcDateTime.AddSeconds(10), CancellationToken.None);
+                // DNS レコードの変更が伝搬するまで 10 秒遅延させる
+                await context.CreateTimer(context.CurrentUtcDateTime.AddSeconds(10), CancellationToken.None);
 
-                    // Azure DNS で正しくレコードが引けるか確認
-                    await activity.CheckDnsChallenge(challengeResults);
-                }
-                else
-                {
-                    challengeResults = await activity.Http01Authorization((site, orderDetails.Payload.Authorizations));
+                // Azure DNS で正しくレコードが引けるか確認
+                await activity.CheckDnsChallenge(challengeResults);
 
-                    // HTTP で正しくアクセスできるか確認
-                    await activity.CheckHttpChallenge(challengeResults);
-                }
 
                 // ACME Answer を実行
                 await activity.AnswerChallenges(challengeResults);
@@ -69,11 +51,9 @@ namespace AppService.Acmebot.Functions
                 // Order のステータスが ready になるまで 60 秒待機
                 await activity.CheckIsReady((orderDetails, challengeResults));
 
-                if (useDns01Auth)
-                {
-                    // 作成した DNS レコードを削除
-                    await activity.CleanupDnsChallenge(challengeResults);
-                }
+                // 作成した DNS レコードを削除
+                await activity.CleanupDnsChallenge(challengeResults);
+
             }
 
             // CSR を作成し Finalize を実行

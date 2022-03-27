@@ -32,7 +32,7 @@ namespace AppService.Acmebot.Functions
 
             var activity = context.CreateActivityProxy<ISharedActivity>();
 
-            var site = await activity.GetSite((request.ResourceGroupName, request.AppName, request.SlotName));
+            var site = await activity.GetContainerApp((request.ResourceGroupName, request.AppName, request.SlotName));
 
             if (site == null)
             {
@@ -65,7 +65,6 @@ namespace AppService.Acmebot.Functions
                 foreach (var hostNameSslState in hostNameSslStates)
                 {
                     hostNameSslState.Thumbprint = certificate.Thumbprint;
-                    hostNameSslState.SslState = request.UseIpBasedSsl ?? false ? SslState.IpBasedEnabled : SslState.SniEnabled;
                     hostNameSslState.ToUpdate = true;
                 }
 
@@ -76,8 +75,7 @@ namespace AppService.Acmebot.Functions
             }
             finally
             {
-                // クリーンアップ処理を実行
-                await activity.CleanupVirtualApplication(site);
+
             }
         }
 

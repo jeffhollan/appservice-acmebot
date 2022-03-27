@@ -41,39 +41,11 @@ namespace AppService.Acmebot.Functions
             var certificates = await activity.GetAllCertificates();
 
             // App Service を取得
-            var sites = await activity.GetSites((resourceGroup, true));
+            var sites = await activity.GetContainerApps((resourceGroup, true));
 
-            foreach (var site in sites.ToLookup(x => x.SplitName().appName))
+            foreach (var site in sites.ToLookup(x => x.Name))
             {
                 var siteInformation = new SiteItem { Name = site.Key, Slots = new List<SlotItem>() };
-
-                foreach (var slot in site)
-                {
-                    var (_, slotName) = slot.SplitName();
-
-                    var hostNameSslStates = slot.HostNameSslStates
-                                                .Where(x => !x.Name.EndsWith(_environment.AppService) && !x.Name.EndsWith(_environment.TrafficManager));
-
-                    var slotInformation = new SlotItem
-                    {
-                        Name = slotName ?? "production",
-                        DnsNames = hostNameSslStates.Select(x => new DnsNameItem
-                        {
-                            Name = x.Name,
-                            Issuer = certificates.FirstOrDefault(xs => xs.Thumbprint == x.Thumbprint)?.Issuer ?? "None"
-                        }).ToArray()
-                    };
-
-                    if (slotInformation.DnsNames.Count != 0)
-                    {
-                        siteInformation.Slots.Add(slotInformation);
-                    }
-                }
-
-                if (siteInformation.Slots.Count != 0)
-                {
-                    result.Add(siteInformation);
-                }
             }
 
             return result;

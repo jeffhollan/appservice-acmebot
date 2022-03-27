@@ -62,6 +62,6 @@ namespace AppService.Acmebot.Functions
 
         Task CleanupDnsChallenge(IReadOnlyList<AcmeChallengeResult> challengeResults);
 
-        Task SendCompletedEvent((Site, DateTime?, IReadOnlyList<string>) input);
+        Task SendCompletedEvent((ContainerApp, DateTime?, IReadOnlyList<string>) input);
     }
 }

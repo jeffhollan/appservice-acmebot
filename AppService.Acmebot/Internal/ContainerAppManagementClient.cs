@@ -36,5 +36,16 @@ namespace AppService.Acmebot
     {
         internal string State;
         internal string Name;
+        public IEnumerable<HostNameSslState> HostNameSslStates;
+
+        public class HostNameSslState
+        {
+            public HostNameSslState()
+            {
+            }
+            public string Name { get; set; }
+            public string Thumbprint { get; set; }
+            public bool ToUpdate { get; set; }
+        }
     }
 }
