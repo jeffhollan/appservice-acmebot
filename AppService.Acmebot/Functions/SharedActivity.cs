@@ -36,7 +36,7 @@ namespace AppService.Acmebot.Functions
     {
         public SharedActivity(IHttpClientFactory httpClientFactory, AzureEnvironment environment, LookupClient lookupClient,
                               AcmeProtocolClientFactory acmeProtocolClientFactory, KuduClientFactory kuduClientFactory,
-                              WebSiteManagementClient webSiteManagementClient, DnsManagementClient dnsManagementClient,
+                              ContainerAppManagementClient acaManagementClient, DnsManagementClient dnsManagementClient,
                               ResourceManagementClient resourceManagementClient, WebhookInvoker webhookInvoker, IOptions<AcmebotOptions> options,
                               ILogger<SharedActivity> logger)
         {
@@ -45,7 +45,7 @@ namespace AppService.Acmebot.Functions
             _lookupClient = lookupClient;
             _acmeProtocolClientFactory = acmeProtocolClientFactory;
             _kuduClientFactory = kuduClientFactory;
-            _webSiteManagementClient = webSiteManagementClient;
+            _acaManagementClient = acaManagementClient;
             _dnsManagementClient = dnsManagementClient;
             _resourceManagementClient = resourceManagementClient;
             _webhookInvoker = webhookInvoker;
@@ -58,7 +58,7 @@ namespace AppService.Acmebot.Functions
         private readonly LookupClient _lookupClient;
         private readonly AcmeProtocolClientFactory _acmeProtocolClientFactory;
         private readonly KuduClientFactory _kuduClientFactory;
-        private readonly WebSiteManagementClient _webSiteManagementClient;
+        private readonly ContainerAppManagementClient _acaManagementClient;
         private readonly DnsManagementClient _dnsManagementClient;
         private readonly ResourceManagementClient _resourceManagementClient;
         private readonly WebhookInvoker _webhookInvoker;
@@ -73,28 +73,27 @@ namespace AppService.Acmebot.Functions
             return _resourceManagementClient.ResourceGroups.ListAllAsync();
         }
 
-        [FunctionName(nameof(GetSite))]
-        public Task<Site> GetSite([ActivityTrigger] (string, string, string) input)
+        [FunctionName(nameof(GetContainerApp))]
+        public Task<ContainerApp> GetContainerApp([ActivityTrigger] (string, string, string) input)
         {
             var (resourceGroupName, appName, slotName) = input;
 
-            if (slotName != "production")
-            {
-                return _webSiteManagementClient.WebApps.GetSlotAsync(resourceGroupName, appName, slotName);
-            }
+            // if (slotName != "production")
+            // {
+            //     return _webSiteManagementClient.WebApps.GetSlotAsync(resourceGroupName, appName, slotName);
+            // }
 
-            return _webSiteManagementClient.WebApps.GetAsync(resourceGroupName, appName);
+            return _acaManagementClient.GetContainerAppsAsync(resourceGroupName, appName);
         }
 
-        [FunctionName(nameof(GetSites))]
-        public async Task<IReadOnlyList<Site>> GetSites([ActivityTrigger] (string, bool) input)
+        [FunctionName(nameof(GetContainerApp))]
+        public async Task<IReadOnlyList<ContainerApp>> GetContainerApps([ActivityTrigger] (string, bool) input)
         {
             var (resourceGroupName, isRunningOnly) = input;
 
-            var sites = await _webSiteManagementClient.WebApps.ListByResourceGroupAllAsync(resourceGroupName);
+            var sites = await _acaManagementClient.ListByResourceGroupAllContainerAppsAsync(resourceGroupName);
 
             return sites.Where(x => !isRunningOnly || x.State == "Running")
-                        .Where(x => x.HostNames.Any(xs => !xs.EndsWith(_environment.AppService) && !xs.EndsWith(_environment.TrafficManager)))
                         .OrderBy(x => x.Name)
                         .ToArray();
         }
@@ -102,7 +101,7 @@ namespace AppService.Acmebot.Functions
         [FunctionName(nameof(GetExpiringCertificates))]
         public async Task<IReadOnlyList<Certificate>> GetExpiringCertificates([ActivityTrigger] DateTime currentDateTime)
         {
-            var certificates = await _webSiteManagementClient.Certificates.ListAllAsync();
+            var certificates = await _acaManagementClient.ListAllCertificatesAsync();
 
             return certificates.Where(x => x.TagsFilter(IssuerName, _options.Endpoint))
                                .Where(x => (x.ExpirationDate.Value - currentDateTime).TotalDays <= _options.RenewBeforeExpiry)
@@ -112,7 +111,7 @@ namespace AppService.Acmebot.Functions
         [FunctionName(nameof(GetAllCertificates))]
         public Task<IReadOnlyList<Certificate>> GetAllCertificates([ActivityTrigger] object input)
         {
-            return _webSiteManagementClient.Certificates.ListAllAsync();
+            return _acaManagementClient.ListAllCertificatesAsync();
         }
 
         [FunctionName(nameof(Order))]
@@ -123,96 +122,96 @@ namespace AppService.Acmebot.Functions
             return await acmeProtocolClient.CreateOrderAsync(dnsNames);
         }
 
-        [FunctionName(nameof(Http01Precondition))]
-        public async Task Http01Precondition([ActivityTrigger] Site site)
-        {
-            var config = await _webSiteManagementClient.WebApps.GetConfigurationAsync(site);
+        // [FunctionName(nameof(Http01Precondition))]
+        // public async Task Http01Precondition([ActivityTrigger] Site site)
+        // {
+        //     var config = await _acaManagementClient.GetContainerAppsConfigurationAsync(site);
 
-            // 既に .well-known が仮想アプリケーションとして追加されているか確認
-            var virtualApplication = config.VirtualApplications.FirstOrDefault(x => x.VirtualPath == "/.well-known");
+        //     // 既に .well-known が仮想アプリケーションとして追加されているか確認
+        //     var virtualApplication = config.VirtualApplications.FirstOrDefault(x => x.VirtualPath == "/.well-known");
 
-            if (virtualApplication != null)
-            {
-                return;
-            }
+        //     if (virtualApplication != null)
+        //     {
+        //         return;
+        //     }
 
-            // 発行プロファイルを取得
-            var credentials = await _webSiteManagementClient.WebApps.ListPublishingCredentialsAsync(site);
+        //     // 発行プロファイルを取得
+        //     var credentials = await _acaManagementClient.WebApps.ListPublishingCredentialsAsync(site);
 
-            var kuduClient = _kuduClientFactory.CreateClient(site.ScmSiteUrl(), credentials.PublishingUserName, credentials.PublishingPassword);
+        //     var kuduClient = _kuduClientFactory.CreateClient(site.ScmSiteUrl(), credentials.PublishingUserName, credentials.PublishingPassword);
 
-            try
-            {
-                // 特殊なファイルが存在する場合は web.config の作成を行わない
-                if (!await kuduClient.ExistsFileAsync(".well-known/configured"))
-                {
-                    // Answer 用ファイルを返すための Web.config を作成
-                    await kuduClient.WriteFileAsync(DefaultWebConfigPath, DefaultWebConfig);
-                }
-            }
-            catch (HttpRequestException ex)
-            {
-                throw new PreconditionException($"Failed to access SCM site. Message: {ex.Message}");
-            }
+        //     try
+        //     {
+        //         // 特殊なファイルが存在する場合は web.config の作成を行わない
+        //         if (!await kuduClient.ExistsFileAsync(".well-known/configured"))
+        //         {
+        //             // Answer 用ファイルを返すための Web.config を作成
+        //             await kuduClient.WriteFileAsync(DefaultWebConfigPath, DefaultWebConfig);
+        //         }
+        //     }
+        //     catch (HttpRequestException ex)
+        //     {
+        //         throw new PreconditionException($"Failed to access SCM site. Message: {ex.Message}");
+        //     }
 
-            // .well-known を仮想アプリケーションとして追加
-            config.VirtualApplications.Add(new VirtualApplication
-            {
-                VirtualPath = "/.well-known",
-                PhysicalPath = "site\\.well-known",
-                PreloadEnabled = false
-            });
+        //     // .well-known を仮想アプリケーションとして追加
+        //     config.VirtualApplications.Add(new VirtualApplication
+        //     {
+        //         VirtualPath = "/.well-known",
+        //         PhysicalPath = "site\\.well-known",
+        //         PreloadEnabled = false
+        //     });
 
-            await _webSiteManagementClient.WebApps.UpdateConfigurationAsync(site, config);
-        }
+        //     await _webSiteManagementClient.WebApps.UpdateConfigurationAsync(site, config);
+        // }
 
-        [FunctionName(nameof(Http01Authorization))]
-        public async Task<IReadOnlyList<AcmeChallengeResult>> Http01Authorization([ActivityTrigger] (Site, IReadOnlyList<string>) input)
-        {
-            var (site, authorizationUrls) = input;
+        // [FunctionName(nameof(Http01Authorization))]
+        // public async Task<IReadOnlyList<AcmeChallengeResult>> Http01Authorization([ActivityTrigger] (Site, IReadOnlyList<string>) input)
+        // {
+        //     var (site, authorizationUrls) = input;
 
-            var acmeProtocolClient = await _acmeProtocolClientFactory.CreateClientAsync();
+        //     var acmeProtocolClient = await _acmeProtocolClientFactory.CreateClientAsync();
 
-            var challengeResults = new List<AcmeChallengeResult>();
+        //     var challengeResults = new List<AcmeChallengeResult>();
 
-            foreach (var authorizationUrl in authorizationUrls)
-            {
-                // Authorization の詳細を取得
-                var authorization = await acmeProtocolClient.GetAuthorizationDetailsAsync(authorizationUrl);
+        //     foreach (var authorizationUrl in authorizationUrls)
+        //     {
+        //         // Authorization の詳細を取得
+        //         var authorization = await acmeProtocolClient.GetAuthorizationDetailsAsync(authorizationUrl);
 
-                // HTTP-01 Challenge の情報を拾う
-                var challenge = authorization.Challenges.FirstOrDefault(x => x.Type == "http-01");
+        //         // HTTP-01 Challenge の情報を拾う
+        //         var challenge = authorization.Challenges.FirstOrDefault(x => x.Type == "http-01");
 
-                if (challenge == null)
-                {
-                    throw new InvalidOperationException("Simultaneous use of HTTP-01 and DNS-01 for authentication is not allowed.");
-                }
+        //         if (challenge == null)
+        //         {
+        //             throw new InvalidOperationException("Simultaneous use of HTTP-01 and DNS-01 for authentication is not allowed.");
+        //         }
 
-                var challengeValidationDetails = AuthorizationDecoder.ResolveChallengeForHttp01(authorization, challenge, acmeProtocolClient.Signer);
+        //         var challengeValidationDetails = AuthorizationDecoder.ResolveChallengeForHttp01(authorization, challenge, acmeProtocolClient.Signer);
 
-                // Challenge の情報を保存する
-                challengeResults.Add(new AcmeChallengeResult
-                {
-                    Url = challenge.Url,
-                    HttpResourceUrl = challengeValidationDetails.HttpResourceUrl,
-                    HttpResourcePath = challengeValidationDetails.HttpResourcePath,
-                    HttpResourceValue = challengeValidationDetails.HttpResourceValue
-                });
-            }
+        //         // Challenge の情報を保存する
+        //         challengeResults.Add(new AcmeChallengeResult
+        //         {
+        //             Url = challenge.Url,
+        //             HttpResourceUrl = challengeValidationDetails.HttpResourceUrl,
+        //             HttpResourcePath = challengeValidationDetails.HttpResourcePath,
+        //             HttpResourceValue = challengeValidationDetails.HttpResourceValue
+        //         });
+        //     }
 
-            // 発行プロファイルを取得
-            var credentials = await _webSiteManagementClient.WebApps.ListPublishingCredentialsAsync(site);
+        //     // 発行プロファイルを取得
+        //     var credentials = await _webSiteManagementClient.WebApps.ListPublishingCredentialsAsync(site);
 
-            var kuduClient = _kuduClientFactory.CreateClient(site.ScmSiteUrl(), credentials.PublishingUserName, credentials.PublishingPassword);
+        //     var kuduClient = _kuduClientFactory.CreateClient(site.ScmSiteUrl(), credentials.PublishingUserName, credentials.PublishingPassword);
 
-            // Kudu API を使い、Answer 用のファイルを作成
-            foreach (var challengeResult in challengeResults)
-            {
-                await kuduClient.WriteFileAsync(challengeResult.HttpResourcePath, challengeResult.HttpResourceValue);
-            }
+        //     // Kudu API を使い、Answer 用のファイルを作成
+        //     foreach (var challengeResult in challengeResults)
+        //     {
+        //         await kuduClient.WriteFileAsync(challengeResult.HttpResourcePath, challengeResult.HttpResourceValue);
+        //     }
 
-            return challengeResults;
-        }
+        //     return challengeResults;
+        // }
 
         [FunctionName(nameof(CheckHttpChallenge))]
         public async Task CheckHttpChallenge([ActivityTrigger] IReadOnlyList<AcmeChallengeResult> challengeResults)
@@ -513,7 +512,7 @@ namespace AppService.Acmebot.Functions
 
             var certificateName = $"{dnsName}-{x509Certificates[0].Thumbprint}";
 
-            return await _webSiteManagementClient.Certificates.CreateOrUpdateAsync(site.ResourceGroup, certificateName, new Certificate
+            return await _acaManagementClient.CreateOrUpdateCertificateAsync(site.ResourceGroup, certificateName, new Certificate
             {
                 Location = site.Location,
                 Password = "P@ssw0rd",
@@ -529,9 +528,9 @@ namespace AppService.Acmebot.Functions
         }
 
         [FunctionName(nameof(UpdateSiteBinding))]
-        public Task UpdateSiteBinding([ActivityTrigger] Site site)
+        public Task UpdateSiteBinding([ActivityTrigger] ContainerApp app)
         {
-            return _webSiteManagementClient.WebApps.CreateOrUpdateAsync(site);
+            return _acaManagementClient.CreateOrUpdateContainerAppAsync(app);
         }
 
         [FunctionName(nameof(CleanupDnsChallenge))]
@@ -558,31 +557,31 @@ namespace AppService.Acmebot.Functions
             }
         }
 
-        [FunctionName(nameof(CleanupVirtualApplication))]
-        public async Task CleanupVirtualApplication([ActivityTrigger] Site site)
-        {
-            var config = await _webSiteManagementClient.WebApps.GetConfigurationAsync(site);
+        // [FunctionName(nameof(CleanupVirtualApplication))]
+        // public async Task CleanupVirtualApplication([ActivityTrigger] ContainerApp app)
+        // {
+        //     var config = await _acaManagementClient.GetContainerAppConfigurationAsync(app);
 
-            // 既に .well-known が仮想アプリケーションとして追加されているか確認
-            var virtualApplication = config.VirtualApplications.FirstOrDefault(x => x.VirtualPath == "/.well-known");
+        //     // 既に .well-known が仮想アプリケーションとして追加されているか確認
+        //     var virtualApplication = config.VirtualApplications.FirstOrDefault(x => x.VirtualPath == "/.well-known");
 
-            if (virtualApplication == null)
-            {
-                return;
-            }
+        //     if (virtualApplication == null)
+        //     {
+        //         return;
+        //     }
 
-            // 作成した仮想アプリケーションを削除
-            config.VirtualApplications.Remove(virtualApplication);
+        //     // 作成した仮想アプリケーションを削除
+        //     config.VirtualApplications.Remove(virtualApplication);
 
-            await _webSiteManagementClient.WebApps.UpdateConfigurationAsync(site, config);
-        }
+        //     await _acaManagementClient.UpdateContainerAppConfigurationAsync(app, config);
+        // }
 
         [FunctionName(nameof(DeleteCertificate))]
         public Task DeleteCertificate([ActivityTrigger] Certificate certificate)
         {
             var resourceGroup = ExtractResourceGroup(certificate.Id);
 
-            return _webSiteManagementClient.Certificates.DeleteAsync(resourceGroup, certificate.Name);
+            return _acaManagementClient.DeleteCertificateAsync(resourceGroup, certificate.Name);
         }
 
         [FunctionName(nameof(SendCompletedEvent))]

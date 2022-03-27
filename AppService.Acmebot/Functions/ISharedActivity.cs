@@ -18,9 +18,9 @@ namespace AppService.Acmebot.Functions
     {
         Task<IReadOnlyList<ResourceGroup>> GetResourceGroups(object input = null);
 
-        Task<Site> GetSite((string, string, string) input);
+        Task<ContainerApp> GetContainerApp((string, string, string) input);
 
-        Task<IReadOnlyList<Site>> GetSites((string, bool) input);
+        Task<IReadOnlyList<ContainerApp>> GetContainerApps((string, bool) input);
 
         Task<IReadOnlyList<Certificate>> GetExpiringCertificates(DateTime currentDateTime);
 
@@ -28,12 +28,12 @@ namespace AppService.Acmebot.Functions
 
         Task<OrderDetails> Order(IReadOnlyList<string> dnsNames);
 
-        Task Http01Precondition(Site site);
+        // Task Http01Precondition(Site site);
 
-        Task<IReadOnlyList<AcmeChallengeResult>> Http01Authorization((Site, IReadOnlyList<string>) input);
+        // Task<IReadOnlyList<AcmeChallengeResult>> Http01Authorization((Site, IReadOnlyList<string>) input);
 
-        [RetryOptions("00:00:10", 12, HandlerType = typeof(ExceptionRetryStrategy<RetriableActivityException>))]
-        Task CheckHttpChallenge(IReadOnlyList<AcmeChallengeResult> challengeResults);
+        // [RetryOptions("00:00:10", 12, HandlerType = typeof(ExceptionRetryStrategy<RetriableActivityException>))]
+        // Task CheckHttpChallenge(IReadOnlyList<AcmeChallengeResult> challengeResults);
 
         Task Dns01Precondition(IReadOnlyList<string> dnsNames);
 
@@ -54,9 +54,9 @@ namespace AppService.Acmebot.Functions
 
         Task<Certificate> UploadCertificate((Site, string, bool, OrderDetails, RSAParameters) input);
 
-        Task UpdateSiteBinding(Site site);
+        Task UpdateSiteBinding(ContainerApp app);
 
-        Task CleanupVirtualApplication(Site site);
+        // Task CleanupVirtualApplication(Site site);
 
         Task DeleteCertificate(Certificate certificate);
 
